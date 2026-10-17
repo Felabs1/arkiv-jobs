@@ -26,7 +26,8 @@ import { NS } from "./types";
 export const CHAIN = tiramisu;
 export const EXPLORER = "https://tiramisu.explorer.arkiv.network/tx/";
 
-const AFTER_DEADLINE_SEC = 10 * 60;
+/** Bids, runs and results live as long as their task, so a finished task still shows its bids. */
+const AFTER_DEADLINE_SEC = 15 * 60;
 /**
  * Tasks outlive their deadline by a little, so a finished task (and its review buttons) stays on
  * the board for a while. The `deadline` attribute, not the expiry, is what the rules use.

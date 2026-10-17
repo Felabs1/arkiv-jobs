@@ -12,7 +12,9 @@ import { CHAIN, publicClient, rpcTransport } from "@/lib/arkiv";
 const AMOUNT = parseEther("0.02"); // ~100 task posts or reviews
 const MIN_BALANCE = parseEther("0.002"); // top up only below this
 const PER_IP_WINDOW_MS = 60 * 60_000;
-const PER_IP_MAX = 3;
+// Generous because judges may share one network (conference Wi-Fi); a wallet is only ever
+// funded while it's nearly empty, so a single wallet can't drain the sponsor.
+const PER_IP_MAX = 20;
 
 // Best effort (per server instance). Enough to stop casual draining of a testnet sponsor.
 const hits = new Map<string, number[]>();

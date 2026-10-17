@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { EXPLORER, createReview, createTask, keepAlive } from "@/lib/arkiv";
 import { leaderboard, taskState, winningResult } from "@/lib/rules";
 import type { Hex, Profile, TaskBundle, Verdict } from "@/lib/types";
-import { connectMetaMask, existingBurner, startBurner, walletClient, type Signer } from "./wallet";
+import { connectMetaMask, existingBurner, friendlyError, startBurner, walletClient, type Signer } from "./wallet";
 import { useBoard } from "./useBoard";
 import { taskProgress } from "./progress";
 import { Overview } from "./components/Overview";
@@ -116,7 +116,7 @@ export default function Board() {
       setToast({ text: s.kind === "burner" ? "Test wallet ready. You can post tasks and review results." : "MetaMask connected" });
       return true;
     } catch (e: any) {
-      setToast({ text: e?.message ?? String(e), error: true });
+      setToast({ text: friendlyError(e), error: true });
       return false;
     } finally {
       setWalletBusy(false);
@@ -128,7 +128,7 @@ export default function Board() {
   async function onPost(t: NewTask): Promise<boolean> {
     if (!signer) return false;
     try {
-      const w = await walletClient(signer);
+      const w = await walletClient(signer, (text) => setToast({ text }));
       const deadline = Math.floor(Date.now() / 1000) + t.minutes * 60;
       const { txHash, entityKey } = await createTask(w, { ...t, deadline });
       setToast({ text: "Task posted. Agents are picking it up.", tx: txHash });
@@ -137,7 +137,7 @@ export default function Board() {
       setTimeout(() => go("live"), 300);
       return true;
     } catch (e: any) {
-      setToast({ text: e?.shortMessage ?? e?.message ?? String(e), error: true });
+      setToast({ text: friendlyError(e), error: true });
       return false;
     }
   }
@@ -148,12 +148,12 @@ export default function Board() {
       return;
     }
     try {
-      const w = await walletClient(signer);
+      const w = await walletClient(signer, (text) => setToast({ text }));
       const { txHash } = await keepAlive(w, key, 1);
       setToast({ text: "Kept alive for another day. Anyone can extend results, not just the agent.", tx: txHash });
       refresh();
     } catch (e: any) {
-      setToast({ text: e?.shortMessage ?? e?.message ?? String(e), error: true });
+      setToast({ text: friendlyError(e), error: true });
     }
   }
 
@@ -173,12 +173,12 @@ export default function Board() {
     const result = winningResult(b.task, b.bids, b.results);
     if (!result) return;
     try {
-      const w = await walletClient(signer);
+      const w = await walletClient(signer, (text) => setToast({ text }));
       const { txHash } = await createReview(w, b.task, result, verdict);
       setToast({ text: verdict === "accepted" ? "Result accepted" : "Result rejected", tx: txHash });
       refresh();
     } catch (e: any) {
-      setToast({ text: e?.shortMessage ?? e?.message ?? String(e), error: true });
+      setToast({ text: friendlyError(e), error: true });
     }
   }
 

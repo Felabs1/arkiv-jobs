@@ -83,26 +83,45 @@ export async function startBurner(onStatus?: (s: string) => void): Promise<Signe
     }
   }
   const address = privateKeyToAccount(k).address;
-  const balance = await publicClient().getBalance({ address });
-  if (balance < 2_000_000_000_000_000n) {
-    onStatus?.("Funding your test wallet with Tiramisu GLM…");
-    const res = await fetch("/api/fund", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ address }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error ?? `Funding failed (${res.status})`);
-  }
+  await ensureFunded(address, onStatus);
   return { address, kind: "burner" };
+}
+
+/** Below this the test wallet asks the sponsor for a top-up before signing anything. */
+const LOW_BALANCE = 2_000_000_000_000_000n; // 0.002 GLM
+
+/** Top the test wallet up if it's running low, so a transaction never fails for lack of gas. */
+export async function ensureFunded(address: Address, onStatus?: (s: string) => void) {
+  const balance = await publicClient().getBalance({ address });
+  if (balance >= LOW_BALANCE) return;
+  onStatus?.("Funding your test wallet with Tiramisu GLM…");
+  const res = await fetch("/api/fund", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ address }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error ?? `Funding failed (${res.status})`);
+}
+
+/** Turn wallet/RPC errors into something a person can act on. */
+export function friendlyError(e: any): string {
+  const text = `${e?.shortMessage ?? ""} ${e?.details ?? ""} ${e?.message ?? ""}`;
+  if (/insufficient funds|exceeds the balance/i.test(text))
+    return "This wallet has no Tiramisu GLM for gas. Use “Try it now” again to top up the test wallet, or fund your MetaMask from hub.arkiv.network/faucet.";
+  if (/User rejected|denied/i.test(text)) return "You rejected the request in your wallet.";
+  if (/ORIGIN_FORBIDDEN/i.test(text)) return "The Arkiv access key doesn't allow this site's origin.";
+  if (/QUOTA_EXCEEDED|ANON_COST_LIMITED|429/i.test(text)) return "Arkiv RPC quota is exhausted for now. Try again in a minute.";
+  return (e?.shortMessage ?? e?.message ?? String(e)).slice(0, 300);
 }
 
 // ---------- signing client for whichever wallet is active ----------
 
-export async function walletClient(signer: Signer) {
+export async function walletClient(signer: Signer, onStatus?: (s: string) => void) {
   if (signer.kind === "burner") {
     const k = loadBurnerKey();
     if (!k) throw new Error("Test wallet missing. Click “Try it now” again.");
+    await ensureFunded(signer.address, onStatus);
     return createWalletClient({ chain: CHAIN, transport: rpcTransport(), account: privateKeyToAccount(k) });
   }
   await ensureChain();
