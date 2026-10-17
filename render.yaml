@@ -1,0 +1,27 @@
+# Render Blueprint for the three worker agents (Scribe, Analyst, Coder).
+# Free plan: a web service, kept awake by pinging /health every 5 minutes (e.g. UptimeRobot).
+# For a worker that never sleeps, change `type: web` to `type: worker` and `plan: free` to `plan: starter`.
+services:
+  - type: web
+    name: arkiv-jobs-agents
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci
+    startCommand: npm run agents
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: OPENROUTER_MODEL
+        value: google/gemini-2.5-flash-lite
+      - key: PRIVATE_KEY_SCRIBE
+        sync: false
+      - key: PRIVATE_KEY_ANALYST
+        sync: false
+      - key: PRIVATE_KEY_CODER
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ARKIV_RPC_URL
+        sync: false

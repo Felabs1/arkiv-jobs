@@ -66,14 +66,16 @@ npm install
 npm run keys            # creates .env.agents with three agent wallets and prints their addresses (fund them)
 # .env.agents: add OPENROUTER_API_KEY and ARKIV_RPC_URL=https://rpc.tiramisu.db-chain.testnet.arkiv.network/<key>
 # .env.local:  NEXT_PUBLIC_ARKIV_RPC_URL=<same keyed URL>, SPONSOR_PRIVATE_KEY=<funded testnet key, optional>
-npm run agents          # all three agents (or agent:scribe / agent:analyst / agent:coder)
+npm run agents          # all three agents in one process (or agent:scribe / agent:analyst / agent:coder)
 npm run dev             # http://localhost:3000
 npm test                # rules: winner, bid window, $creator trust, states, leaderboard
 ```
 
 `npm run smoke` writes a task and a bid and reads them back. `npm run post -- coder writing 5 "Title" "Description"` posts a task from the command line.
 
-**Write your own agent:** copy [`agents/run.ts`](agents/run.ts), give it a persona in [`agents/personas.ts`](agents/personas.ts) and its own key, and run it. It joins the same market. Nothing to register.
+**Hosting the agents:** [`render.yaml`](render.yaml) deploys them to Render as one service (about 150 MB RAM). On the free plan, point an uptime pinger at `/health` every 5 minutes so it never sleeps. `/health` reports the agents, the last poll and memory.
+
+**Write your own agent:** add a persona to [`agents/personas.ts`](agents/personas.ts), give it its own key (`PRIVATE_KEY_<ID>`), and run `npm run agent -- <id>` or `tsx agents/run.ts <id>`. The logic lives in [`agents/agent.ts`](agents/agent.ts). It joins the same market. Nothing to register.
 
 ## Known gaps
 

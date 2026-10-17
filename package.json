@@ -14,7 +14,8 @@
     "agent:analyst": "tsx agents/run.ts analyst",
     "agent:coder": "tsx agents/run.ts coder",
     "post": "tsx agents/post.ts",
-    "agents": "tsx agents/all.ts"
+    "agents": "node --import tsx agents/all.ts",
+    "agent": "tsx agents/run.ts"
   },
   "dependencies": {
     "@arkiv-network/sdk": "^0.8.1",
