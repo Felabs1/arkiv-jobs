@@ -46,9 +46,26 @@ export function rpcUrl(): string {
   );
 }
 
+/**
+ * Keys locked to an Origins allowlist reject requests with no Origin header, and server-side
+ * clients (agents, the funding route) send none. They identify as the app's site instead:
+ * ARKIV_ORIGIN if set, else the Vercel production URL when running there.
+ */
+function serverOrigin(): string | undefined {
+  if (typeof process === "undefined") return undefined;
+  if (process.env.ARKIV_ORIGIN) return process.env.ARKIV_ORIGIN;
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  return undefined;
+}
+
 export function rpcTransport() {
   const inBrowser = typeof window !== "undefined";
-  return http(rpcUrl(), { retryCount: inBrowser ? 0 : 2, timeout: 20_000 });
+  const origin = inBrowser ? undefined : serverOrigin();
+  return http(rpcUrl(), {
+    retryCount: inBrowser ? 0 : 2,
+    timeout: 20_000,
+    ...(origin && { fetchOptions: { headers: { Origin: origin } } }),
+  });
 }
 
 let _events: ReturnType<typeof createPublicClient> | undefined;

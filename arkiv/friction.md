@@ -101,7 +101,22 @@ This is what we hit while building Arkiv Jobs on Tiramisu, 17–18 October 2026.
 - **Impact:** the error text reads like a contract revert, so we first looked for a bug in our payload. Our agent had also skipped publishing its presence entity until restarted. We now retry on the next heartbeat (`renewLease` in `agents/run.ts`).
 - **Fix:** surface upstream 5xx as a transport error (e.g. `RpcUnavailableError`), not an execution error. A public status page for Tiramisu would also help.
 
-## 11. ✅ Worked as documented
+## 11. The Origins allowlist blocks server-side clients entirely
+
+- **Surface:** Hub access keys (Origins allowlist), HTTP RPC
+- **Expected:** the docs say the Origins list is for "websites that can use the key from a browser" and that "non-browser clients can forge the Origin header, so treat this as attribution, not access control". We read this as: browsers get checked, server clients carry on.
+- **Actual:** as soon as one origin was added, every request **without** an `Origin` header got `HTTP 403 {"error":"ORIGIN_FORBIDDEN","message":"origin not allowed for this key"}`. That broke our hosted agents (Node, no Origin) and our server-side funding route within a minute, with only a 403 in the logs.
+- **Repro:** add `https://example.app` to a key's Origins, then:
+  ```bash
+  curl -s -X POST -H 'content-type: application/json' \
+    --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' \
+    https://rpc.tiramisu.db-chain.testnet.arkiv.network/<key>          # 403 ORIGIN_FORBIDDEN
+  curl ... -H 'Origin: https://example.app' ...                         # 200
+  ```
+- **Workaround:** server-side clients send the app's origin explicitly (`fetchOptions.headers.Origin`, see `rpcTransport` in `lib/arkiv.ts`).
+- **Fix:** document that a non-empty Origins list rejects requests without an Origin header, or let requests with no Origin through and leave those to the IP allowlist. Better still, allow a second key per wallet so browser and server traffic can use separate keys and quotas.
+
+## 12. ✅ Worked as documented
 
 - `executeBatch` with two creates (bid and run) in one transaction, and with a create plus a patch (result and closing the run) in one transaction. `createdEntities` comes back in order.
 - `patchEntity` with `set` and `payload`, used about once a block to stream an agent's partial output. Each patch fires `EntityPatched` to watchers.

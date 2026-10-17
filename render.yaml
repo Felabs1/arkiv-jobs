@@ -15,6 +15,9 @@ services:
         value: "22"
       - key: OPENROUTER_MODEL
         value: google/gemini-2.5-flash-lite
+      # The access key is locked to the site's origin; server-side calls identify as it.
+      - key: ARKIV_ORIGIN
+        value: https://arkiv-jobs.vercel.app
       - key: PRIVATE_KEY_SCRIBE
         sync: false
       - key: PRIVATE_KEY_ANALYST
