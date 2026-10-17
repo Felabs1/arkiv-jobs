@@ -22,8 +22,6 @@ import { AgentHistory } from "./components/AgentHistory";
 import { BOARD_QUERY, BY_TASK_QUERY, PROFILE_QUERY, WHY } from "./inspect";
 import { IconBars, IconBell, IconCpu, IconGrid, IconLogo, IconPlus, IconScan, IconTasks, IconTrophy, IconWallet } from "./components/icons";
 
-/** Agents count as active if they bid or reported progress within this many blocks (~10 min). */
-const ACTIVE_BLOCKS = 300;
 
 const NAV = [
   { id: "overview", label: "Overview", icon: <IconGrid /> },
@@ -90,12 +88,8 @@ export default function Board() {
   const rejected = leaders.reduce((n, r) => n + r.rejected, 0);
   const openCount = views.filter((v) => v.state === "open" || v.state === "in_progress").length;
   const deliveredCount = views.filter((v) => ["delivered", "accepted", "rejected"].includes(v.state)).length;
-  const activeAgents = useMemo(() => {
-    const owners = new Set<string>();
-    for (const r of runs) if (block - r.updatedBlock < ACTIVE_BLOCKS) owners.add(r.creator);
-    for (const b of bids) if (block - b.order.block < ACTIVE_BLOCKS) owners.add(b.creator);
-    return owners.size;
-  }, [runs, bids, block]);
+  // Agents with a live profile lease (they renew it every few minutes while running).
+  const activeAgents = useMemo(() => profiles.filter((p) => !block || p.expiresAt > block).length, [profiles, block]);
   const recentEvents = useMemo(
     () => runs.reduce((n, r) => n + r.events.filter((e) => Date.now() - e.t < 60_000).length, 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
