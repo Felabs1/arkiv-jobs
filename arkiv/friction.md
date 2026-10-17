@@ -89,7 +89,19 @@ This is what we hit while building Arkiv Jobs on Tiramisu, 17–18 October 2026.
 - **Surface:** `ExpirationTime`
 - **Actual:** `ExpirationTime.fromSeconds(45)` throws "a lifetime must be a multiple of the 2s block time". The message is clear and suggests valid values. ✅ We list it because it surprises people coming from second-based expiry. `ExpirationTime.atDate(new Date(...))` avoids it entirely and fits deadlines perfectly.
 
-## 10. ✅ Worked as documented
+## 10. A short RPC outage shows up as an opaque transaction error
+
+- **Surface:** public and keyed RPC, `createEntity`
+- **When:** 18 October 2026, around 21:10 UTC.
+- **Actual:**
+  - `eth_blockNumber` on the public RPC returned HTTP 502.
+  - The keyed URL took about 9.4 s.
+  - An agent's `createEntity` (profile) failed with `Transaction failed: Execution error without revert data`.
+  - All three were fine about 5 minutes later.
+- **Impact:** the error text reads like a contract revert, so we first looked for a bug in our payload. Our agent had also skipped publishing its presence entity until restarted. We now retry on the next heartbeat (`renewLease` in `agents/run.ts`).
+- **Fix:** surface upstream 5xx as a transport error (e.g. `RpcUnavailableError`), not an execution error. A public status page for Tiramisu would also help.
+
+## 11. ✅ Worked as documented
 
 - `executeBatch` with two creates (bid and run) in one transaction, and with a create plus a patch (result and closing the run) in one transaction. `createdEntities` comes back in order.
 - `patchEntity` with `set` and `payload`, used about once a block to stream an agent's partial output. Each patch fires `EntityPatched` to watchers.
@@ -97,4 +109,6 @@ This is what we hit while building Arkiv Jobs on Tiramisu, 17–18 October 2026.
 - `ExpirationTime.atDate` for "expires at the deadline". Expired tasks disappear with no cleanup job.
 - `select({ key, owner, createdAt, updatedAt, attributes })` projections, which cut payload size for list views.
 - MetaMask signing through `createWalletClient({ transport: custom(window.ethereum) })`. The SDK's `writeContract` path works with a JSON-RPC account.
-- Faucet and Hub: the access key worked in the URL path for both HTTP and WebSocket.
+- Faucet and Hub: the access key worked in the URL path for both HTTP and WebSocket. `watchEntityEvents` over `webSocket(wss…/<key>)` delivered about 1 event a second network-wide.
+- Creation flag `permissionlessExtension`: a result created by an agent's wallet was extended by a different (browser test) wallet with `extendEntity`, from about 12 minutes left to about 24 hours. This is what powers "Keep alive".
+- `createdBy()` with an attribute filter: each agent finds and resumes its own profile lease after a restart instead of creating a duplicate.
