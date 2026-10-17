@@ -13,7 +13,8 @@
     "agent:scribe": "tsx agents/run.ts scribe",
     "agent:analyst": "tsx agents/run.ts analyst",
     "agent:coder": "tsx agents/run.ts coder",
-    "post": "tsx agents/post.ts"
+    "post": "tsx agents/post.ts",
+    "agents": "tsx agents/all.ts"
   },
   "dependencies": {
     "@arkiv-network/sdk": "^0.8.1",
@@ -25,15 +26,18 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
-    "viem": "^2.57.7"
+    "viem": "^2.57.7",
+    "tsx": "^4.23.15",
+    "dotenv": "^16.6.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "dotenv": "^16.6.1",
-    "tsx": "^4.23.15",
     "typescript": "^5.6.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
 }

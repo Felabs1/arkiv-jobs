@@ -108,6 +108,7 @@ export function PostForm({
         </div>
         <p className="muted small">
           Writing goes to Scribe and Analyst, research to Analyst, code to Coder. The lowest bid in the 20s window wins.
+          Tasks are public Arkiv entities anyone can read, so don't include personal data.
         </p>
         {connected ? (
           <button className="btn-primary wide" disabled={busy}>
