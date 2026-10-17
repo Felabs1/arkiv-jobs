@@ -55,13 +55,13 @@ export function bidCutoffBlock(task: Task, bids: Bid[]): number | null {
 export function validBids(task: Task, bids: Bid[]): Bid[] {
   const cutoff = bidCutoffBlock(task, bids);
   if (cutoff === null) return [];
-  const byOwner = new Map<string, Bid>();
+  const byCreator = new Map<string, Bid>();
   for (const b of [...bids].sort((x, y) => compareOrder(x.order, y.order))) {
     if (!wellFormed(task, b)) continue;
     if (b.order.block > cutoff) continue;
-    if (!byOwner.has(b.owner)) byOwner.set(b.owner, b);
+    if (!byCreator.has(b.creator)) byCreator.set(b.creator, b);
   }
-  return [...byOwner.values()];
+  return [...byCreator.values()];
 }
 
 /** Lowest price wins; ties go to whichever bid landed on-chain first. */
@@ -76,15 +76,15 @@ export function winningResult(task: Task, bids: Bid[], results: Result[]): Resul
   const winner = pickWinner(task, bids);
   if (!winner) return null;
   const mine = results
-    .filter((r) => r.task === task.key && r.owner === winner.owner)
+    .filter((r) => r.task === task.key && r.creator === winner.creator)
     .sort((a, b) => compareOrder(a.order, b.order));
   return mine[0] ?? null;
 }
 
-/** Only a review signed by the task's owner counts. */
+/** Only a review created by the task's creator counts. */
 export function ownerReview(task: Task, reviews: Review[]): Review | null {
   const mine = reviews
-    .filter((r) => r.task === task.key && r.owner === task.owner)
+    .filter((r) => r.task === task.key && r.creator === task.creator)
     .sort((a, b) => compareOrder(a.order, b.order));
   return mine[0] ?? null;
 }
@@ -113,7 +113,7 @@ export function leaderboard(reviews: Review[]): LeaderRow[] {
   const rows = new Map<string, LeaderRow & { last: ChainOrder }>();
   const seenTask = new Set<string>();
   for (const r of [...reviews].sort((a, b) => compareOrder(a.order, b.order))) {
-    if (r.owner !== r.poster) continue;
+    if (r.creator !== r.poster) continue;
     if (seenTask.has(r.task)) continue; // first review per task is final
     seenTask.add(r.task);
     const row = rows.get(r.agent) ?? { agent: r.agent, name: r.agentName, accepted: 0, rejected: 0, last: r.order };

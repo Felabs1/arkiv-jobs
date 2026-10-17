@@ -13,7 +13,10 @@ import {
   EXPLORER,
   createBidWithRun,
   currentBlock,
+  createProfile,
   deliverWithRun,
+  extendProfile,
+  findOwnProfile,
   updateRun,
   type RunState,
   getTaskBundle,
@@ -108,7 +111,7 @@ async function handle(task: Task) {
   if (task.deadline - Date.now() / 1000 < MIN_SECONDS_LEFT) return;
 
   let bundle = await getTaskBundle(task);
-  const myBid = () => bundle.bids.find((b) => b.owner === me);
+  const myBid = () => bundle.bids.find((b) => b.creator === me);
   const windowClosed = async () => {
     const cutoff = bidCutoffBlock(task, bundle.bids);
     return cutoff !== null && (await currentBlock()) >= cutoff;
@@ -142,7 +145,7 @@ async function handle(task: Task) {
     }
   } else {
     // Restarted mid-task: pick our run entity back up.
-    const run = bundle.runs?.find((r) => r.owner === me);
+    const run = bundle.runs?.find((r) => r.creator === me);
     if (run) {
       runs.set(task.key, new RunTracker(task, run.key, { stage: run.stage, progress: run.progress, partial: run.partial, events: run.events }));
     }
@@ -174,7 +177,7 @@ async function settle(task: Task): Promise<void> {
   bundle = await getTaskBundle(task);
   const winner = pickWinner(task, bundle.bids);
   if (!winner) return log(task, "window closed with no valid bids");
-  if (winner.owner !== me) {
+  if (winner.creator !== me) {
     run?.push({ stage: "lost", progress: 100 }, `Lost to ${winner.agent} at ${winner.price} pts`);
     return log(task, `lost to ${winner.agent} at ${winner.price} pts`);
   }
@@ -205,6 +208,52 @@ async function settle(task: Task): Promise<void> {
   const { txHash } = await serialWrite(() => deliverWithRun(wallet, task, { agent: persona.name, output }, run.key, final));
   run.state = final;
   log(task, `delivered (${output.length} chars) ${EXPLORER}${txHash}`);
+  renewLease("after delivery");
+}
+
+/**
+ * The agent's public profile is a 10-minute lease on Arkiv, renewed while the agent runs
+ * (Lifetime Extension). If the process stops, the profile expires and the agent drops off
+ * the board's "Agents online" list on its own; no one has to clean up.
+ */
+let profileKey: Hex | null = null;
+const LEASE_RENEW_MS = 3 * 60_000;
+
+async function startLease() {
+  const existing = await findOwnProfile(me as Hex).catch(() => null);
+  if (existing) {
+    profileKey = existing.key;
+    await renewLease("resumed profile");
+    return;
+  }
+  const { entityKey, txHash } = await serialWrite(() =>
+    createProfile(wallet, {
+      agent: persona.name,
+      categories: persona.categories,
+      model: process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash-lite",
+      bio: persona.style,
+    }),
+  );
+  profileKey = entityKey;
+  log(null, `profile published ${EXPLORER}${txHash}`);
+}
+
+async function renewLease(why: string) {
+  if (!profileKey) {
+    // Never published (e.g. the RPC was down at startup) or lost: try again now.
+    await startLease().catch((e) => log(null, `could not publish profile: ${e?.message ?? e}`));
+    return;
+  }
+  const key = profileKey;
+  try {
+    await serialWrite(() => extendProfile(wallet, key));
+    log(null, `lease renewed (${why})`);
+  } catch (e: any) {
+    log(null, `lease renewal failed: ${e?.shortMessage ?? e?.message ?? e}`);
+    // The profile may have expired while we were offline; publish a fresh one.
+    profileKey = null;
+    await startLease().catch(() => {});
+  }
 }
 
 async function poll() {
@@ -223,6 +272,8 @@ async function main() {
     process.exit(1);
   }
   log(null, `online as ${me} (${formatEther(balance)} GLM), watching ${persona.categories.join(", ")}`);
+  await startLease().catch((e) => log(null, `could not publish profile: ${e?.message ?? e}`));
+  setInterval(() => renewLease("heartbeat"), LEASE_RENEW_MS);
   await poll();
   // Poll for open tasks. Watching creation events would fire for every entity on the whole
   // Arkiv network and cost a lookup each; a filtered query every few seconds is far cheaper,

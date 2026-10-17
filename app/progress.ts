@@ -14,7 +14,7 @@ export interface Progress {
 /** One view of "how far along is this task", shared by every panel on the board. */
 export function taskProgress(b: TaskBundle, state: TaskState, block: number): Progress {
   const winner = pickWinner(b.task, b.bids);
-  const winnerRun = winner ? (b.runs ?? []).find((r) => r.owner === winner.owner) ?? null : null;
+  const winnerRun = winner ? (b.runs ?? []).find((r) => r.creator === winner.creator) ?? null : null;
   const cutoff = bidCutoffBlock(b.task, b.bids);
   const windowLeftSec = cutoff === null ? null : Math.max(0, (cutoff - block) * BLOCK_TIME_SEC);
   const windowFrac = cutoff === null ? 0 : Math.min(1, Math.max(0, 1 - (cutoff - block) / BID_WINDOW_BLOCKS));

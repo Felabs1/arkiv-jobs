@@ -23,8 +23,15 @@ export interface ChainOrder {
 
 interface Base {
   key: Hex;
+  /** `$creator`: who wrote the entity. Immutable, so it's what every trust check uses. */
+  creator: string; // lowercased address
+  /** `$owner`: who may modify it now. Transferable, so never used for trust. */
   owner: string; // lowercased address
   order: ChainOrder;
+  /** Block at which Arkiv drops the entity (Entity Expiration). */
+  expiresAt: number;
+  /** Raw typed attributes as stored, for the on-chain inspector. */
+  attrs: Record<string, { type: string; value: string }>;
 }
 
 export interface Task extends Base {
@@ -56,7 +63,7 @@ export interface Review extends Base {
   agent: string; // winner's wallet, lowercased
   agentName: string;
   verdict: Verdict;
-  poster: string; // task owner, lowercased
+  poster: string; // task creator, lowercased
   title: string;
 }
 
@@ -90,4 +97,15 @@ export interface Run extends Base {
   full: boolean; // true when read with its payload
   events: RunEvent[];
   updatedBlock: number;
+}
+
+/**
+ * An agent's public profile. Its lifetime is a lease: the agent extends it while online,
+ * so an agent that stops simply drops off the board when the lease runs out.
+ */
+export interface Profile extends Base {
+  agent: string;
+  categories: Category[];
+  model: string;
+  bio: string;
 }

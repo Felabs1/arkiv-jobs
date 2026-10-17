@@ -7,8 +7,8 @@ import {
 } from "@arkiv-network/sdk";
 import { tiramisu } from "@arkiv-network/sdk/chains";
 import { eq, gt, or, type Expression } from "@arkiv-network/sdk/query";
-import { http } from "viem";
-import type { Bid, Category, Hex, Result, Review, Run, RunEvent, RunStage, Task, TaskBundle, Verdict } from "./types";
+import { http, webSocket } from "viem";
+import type { Bid, Category, Hex, Profile, Result, Review, Run, RunEvent, RunStage, Task, TaskBundle, Verdict } from "./types";
 import { NS } from "./types";
 
 /**
@@ -16,6 +16,7 @@ import { NS } from "./types";
  *   task    attrs: category, reward, deadline           payload: { title, description }   expires: deadline
  *   bid     attrs: task, agent, price                   payload: { pitch }                expires: deadline + 10 min
  *   result  attrs: task, agent                          payload: { output }               expires: deadline + 10 min
+ *   profile attrs: agent, categories, model              payload: { bio }                  expires: 10 min lease, extended while online
  *   run     attrs: task, agent, stage, progress         payload: { partial, events }      expires: deadline + 10 min
  *   review  attrs: task, result, agent, agent_name,      payload: { title }                expires: 30 days
  *                  verdict, poster
@@ -50,6 +51,21 @@ export function rpcTransport() {
   return http(rpcUrl(), { retryCount: inBrowser ? 0 : 2, timeout: 20_000 });
 }
 
+let _events: ReturnType<typeof createPublicClient> | undefined;
+/**
+ * Client for live entity events over WebSocket. With no `fromBlock`, watchEntityEvents keeps a
+ * real subscription open instead of polling logs over HTTP.
+ */
+export function eventsClient() {
+  if (!_events) {
+    _events = createPublicClient({
+      chain: tiramisu,
+      transport: webSocket(rpcUrl().replace(/^http/, "ws"), { keepAlive: true, reconnect: true }),
+    });
+  }
+  return _events;
+}
+
 let _public: ReturnType<typeof createPublicClient> | undefined;
 export function publicClient() {
   if (!_public) _public = createPublicClient({ chain: tiramisu, transport: rpcTransport() });
@@ -76,12 +92,25 @@ function decodePayload(entity: any): any {
   }
 }
 
+function rawAttrs(entity: any): Record<string, { type: string; value: string }> {
+  const out: Record<string, { type: string; value: string }> = {};
+  for (const [k, v] of Object.entries(entity.attributes ?? {})) {
+    const typed = v as any;
+    out[k] = { type: String(typed?.type ?? typeof v), value: String(typed?.value ?? v) };
+  }
+  return out;
+}
+
 function base(entity: any) {
   const key = String(entity.key).toLowerCase() as Hex;
+  const owner = String(entity.owner ?? "").toLowerCase();
   return {
     key,
-    owner: String(entity.owner ?? "").toLowerCase(),
+    creator: String(entity.creator ?? owner).toLowerCase(),
+    owner,
     order: { block: Number(entity.createdAt ?? 0), key },
+    expiresAt: Number(entity.expiresAt ?? 0),
+    attrs: rawAttrs(entity),
   };
 }
 
@@ -159,15 +188,33 @@ export function toRun(entity: any): Run {
   };
 }
 
+export function toProfile(entity: any): Profile {
+  const a = attrMap(entity);
+  const p = decodePayload(entity);
+  return {
+    ...base(entity),
+    agent: String(a.agent ?? ""),
+    categories: String(a.categories ?? "").split(",").filter(Boolean) as Category[],
+    model: String(a.model ?? ""),
+    bio: String(p.bio ?? ""),
+  };
+}
+
 // ---------- reads ----------
 
 /**
  * Live entities on this board matching the filters, following pagination.
  * Returns the block the node answered at, so callers need no extra block call.
  */
-async function fetchWhere(filters: Expression[], select: any = "*"): Promise<{ entities: any[]; block: number }> {
+async function fetchWhere(
+  filters: Expression[],
+  select: any = "*",
+  createdBy?: Hex,
+): Promise<{ entities: any[]; block: number }> {
   const entities: any[] = [];
-  let page = await publicClient().select(select).where(eq("ns", NS), ...filters).limit(200).fetch();
+  let q = publicClient().select(select).where(eq("ns", NS), ...filters).limit(200);
+  if (createdBy) q = q.createdBy(createdBy);
+  let page = await q.fetch();
   const block = Number(page.blockNumber);
   entities.push(...page.entities);
   while (page.hasNextPage()) {
@@ -191,7 +238,8 @@ export async function listTasks(): Promise<Task[]> {
   return (await fetchAll("task", [gt("deadline", u64(now))])).map(toTask);
 }
 
-const RUN_HEADER = { key: true, owner: true, createdAt: true, updatedAt: true, attributes: true } as const;
+const RUN_HEADER = { key: true, owner: true, creator: true, createdAt: true, updatedAt: true, expiresAt: true, attributes: true } as const;
+const RUN_HEADER_WITH_PAYLOAD = { ...RUN_HEADER, payload: true } as const;
 
 /** Bids, results and reviews for one task, in a single query. */
 export async function getTaskBundle(task: Task): Promise<TaskBundle> {
@@ -212,6 +260,7 @@ export interface BoardSnapshot {
   results: Result[];
   reviews: Review[];
   runs: Run[];
+  profiles: Profile[];
   block: number;
 }
 
@@ -221,7 +270,7 @@ export interface BoardSnapshot {
  */
 export async function listBoard(): Promise<BoardSnapshot> {
   const [{ entities, block }, runs] = await Promise.all([
-    fetchWhere([or(eq("type", "task"), eq("type", "bid"), eq("type", "result"), eq("type", "review"))]),
+    fetchWhere([or(eq("type", "task"), eq("type", "bid"), eq("type", "result"), eq("type", "review"), eq("type", "profile"))]),
     fetchWhere([eq("type", "run")], RUN_HEADER),
   ]);
   const of = (t: string) => entities.filter((e) => typeOf(e) === t);
@@ -231,8 +280,21 @@ export async function listBoard(): Promise<BoardSnapshot> {
     results: of("result").map(toResult),
     reviews: of("review").map(toReview),
     runs: runs.entities.map(toRun),
+    profiles: of("profile").map(toProfile),
     block,
   };
+}
+
+/** Agents currently online: profiles whose lease hasn't run out. */
+export async function listProfiles(): Promise<Profile[]> {
+  return (await fetchAll("profile")).map(toProfile);
+}
+
+/** Everything one wallet created on this board: an agent's verifiable work history. */
+export async function listByCreator(creator: Hex) {
+  const { entities } = await fetchWhere([], RUN_HEADER_WITH_PAYLOAD, creator);
+  const of = (t: string) => entities.filter((e) => typeOf(e) === t);
+  return { bids: of("bid").map(toBid), results: of("result").map(toResult), runs: of("run").map(toRun) };
 }
 
 /** One run in full, including the streamed text. */
@@ -374,6 +436,37 @@ export async function updateRun(wallet: Wallet, runKey: Hex, run: RunState) {
   return wallet.patchEntity({ entityKey: runKey, set: runAttrs(run), payload: runPayload(run), contentType: "application/json" });
 }
 
+/** Lease length for an agent profile; agents renew well before it runs out. */
+export const PROFILE_LEASE_MIN = 10;
+
+export async function createProfile(wallet: Wallet, p: { agent: string; categories: Category[]; model: string; bio: string }) {
+  return wallet.createEntity({
+    payload: jsonToPayload({ bio: p.bio }),
+    contentType: "application/json",
+    attributes: { ns: NS, type: "profile", agent: p.agent, categories: p.categories.join(","), model: attrText(p.model) || "-" },
+    expires: ExpirationTime.fromMinutes(PROFILE_LEASE_MIN),
+  });
+}
+
+/** Renew an agent's lease (Lifetime Extension): it stays listed for another lease period from now. */
+export async function extendProfile(wallet: Wallet, key: Hex) {
+  return wallet.extendEntity({ entityKey: key, expires: ExpirationTime.fromMinutes(PROFILE_LEASE_MIN) });
+}
+
+/** Find this wallet's live profile, if it still has one from an earlier run. */
+export async function findOwnProfile(creator: Hex): Promise<Profile | null> {
+  const { entities } = await fetchWhere([eq("type", "profile")], "*", creator);
+  return entities.length ? toProfile(entities[0]) : null;
+}
+
+/**
+ * Community "keep alive": results are created with permissionless extension, so any wallet,
+ * not just the agent, can pay to keep a good answer on Arkiv longer.
+ */
+export async function keepAlive(wallet: Wallet, key: Hex, days = 1) {
+  return wallet.extendEntity({ entityKey: key, expires: ExpirationTime.fromDays(days) });
+}
+
 /** The result and the final run update, in one transaction. */
 export async function deliverWithRun(
   wallet: Wallet,
@@ -389,6 +482,7 @@ export async function deliverWithRun(
         contentType: "application/json",
         attributes: { ns: NS, type: "result", task: task.key, agent: r.agent },
         expires: at(task.deadline + AFTER_DEADLINE_SEC),
+        flags: { permissionlessExtension: true },
       },
     ],
     patches: [{ entityKey: runKey, set: runAttrs(run), payload: runPayload(run), contentType: "application/json" }],
@@ -414,10 +508,10 @@ export async function createReview(wallet: Wallet, task: Task, result: Result, v
       type: "review",
       task: task.key,
       result: result.key,
-      agent: result.owner,
+      agent: result.creator,
       agent_name: result.agent,
       verdict,
-      poster: task.owner,
+      poster: task.creator,
     },
     expires: ExpirationTime.fromDays(30),
   });

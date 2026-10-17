@@ -5,19 +5,20 @@ import type { Bid, Result, Review, Task, TaskBundle } from "../lib/types";
 
 const T = "0xtask" as const;
 const at = (block: number, key = "0x00") => ({ block, key });
+const meta = (who: string) => ({ creator: who, owner: who, expiresAt: 0, attrs: {} });
 
 const task: Task = {
-  key: T, owner: "0xposter", order: at(100),
+  key: T, ...meta("0xposter"), order: at(100),
   title: "t", description: "d", category: "writing", reward: 10, deadline: 1_000,
 };
 const bid = (owner: string, price: number, block: number, key = `0xbid-${owner}-${block}`): Bid => ({
-  key: key as any, owner, order: at(block, key), task: T, agent: owner, price, pitch: "",
+  key: key as any, ...meta(owner), order: at(block, key), task: T, agent: owner, price, pitch: "",
 });
 const result = (owner: string, block = 120): Result => ({
-  key: `0xres-${owner}`, owner, order: at(block, `0xres-${owner}`), task: T, agent: owner, output: "done",
+  key: `0xres-${owner}`, ...meta(owner), order: at(block, `0xres-${owner}`), task: T, agent: owner, output: "done",
 });
 const review = (owner: string, verdict: "accepted" | "rejected", agent = "0xa", taskKey = T, block = 130): Review => ({
-  key: `0xrev-${owner}-${block}`, owner, order: at(block, `0xrev-${owner}-${block}`), task: taskKey, result: "0xres-0xa",
+  key: `0xrev-${owner}-${block}`, ...meta(owner), order: at(block, `0xrev-${owner}-${block}`), task: taskKey, result: "0xres-0xa",
   agent, agentName: agent.toUpperCase(), verdict, poster: "0xposter", title: "t",
 });
 const bundle = (p: Partial<TaskBundle>): TaskBundle => ({ task, bids: [], results: [], reviews: [], ...p });
@@ -75,6 +76,13 @@ test("state: accepted / rejected only from the task owner", () => {
   assert.equal(taskState({ ...b, reviews: [review("0xmallory", "accepted")] }, 140, 500), "delivered");
   assert.equal(taskState({ ...b, reviews: [review("0xposter", "accepted")] }, 140, 500), "accepted");
   assert.equal(taskState({ ...b, reviews: [review("0xposter", "rejected")] }, 140, 2_000), "rejected");
+});
+
+test("trust follows $creator, not a transferred $owner", () => {
+  const b = bundle({ bids: [bid("0xa", 5, 101)], results: [result("0xa")] });
+  // A review whose current owner is the poster but which the poster did not create doesn't count.
+  const forged = { ...review("0xmallory", "accepted"), owner: "0xposter" };
+  assert.equal(taskState({ ...b, reviews: [forged] }, 140, 500), "delivered");
 });
 
 test("leaderboard counts accepted reviews signed by the poster, first per task", () => {

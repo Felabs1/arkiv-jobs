@@ -26,7 +26,7 @@ export function LiveWork({
   position: string;
 }) {
   const run = progress?.winnerRun ?? null;
-  const result = bundle?.results.find((r) => run && r.owner === run.owner);
+  const result = bundle?.results.find((r) => run && r.creator === run.creator);
   // Once delivered, the result is the authoritative text; while working, show what has streamed in.
   const text = result?.output || run?.partial || "";
   const pct = Math.round(progress?.pct ?? 0);

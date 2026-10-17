@@ -1,11 +1,29 @@
 "use client";
 
 import { useState } from "react";
-import { STATE_LABEL, pickWinner, validBids, winningResult, type TaskState } from "@/lib/rules";
-import type { TaskBundle, Verdict } from "@/lib/types";
+import { BLOCK_TIME_SEC, STATE_LABEL, ownerReview, pickWinner, validBids, winningResult, type TaskState } from "@/lib/rules";
+import type { Hex, TaskBundle, Verdict } from "@/lib/types";
 import type { Progress } from "../progress";
+import { BY_TASK_QUERY, OPEN_TASKS_QUERY, WHY } from "../inspect";
+import type { InspectTarget } from "./EntityInspector";
 import { StreamingText } from "./StreamingText";
-import { IconCheck, IconX } from "./icons";
+import { IconBlocks, IconCheck, IconX } from "./icons";
+
+/** Small "On Arkiv" button; stops the click from also selecting the card. */
+function OnArkiv({ onClick, label = "On Arkiv" }: { onClick: () => void; label?: string }) {
+  return (
+    <button
+      type="button"
+      className="on-arkiv"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      <IconBlocks /> {label}
+    </button>
+  );
+}
 
 function mmss(sec: number) {
   if (sec <= 0) return "0:00";
@@ -42,6 +60,9 @@ export function TaskCard({
   selected,
   onSelect,
   onReview,
+  onInspect,
+  onKeepAlive,
+  block,
 }: {
   bundle: TaskBundle;
   state: TaskState;
@@ -51,6 +72,9 @@ export function TaskCard({
   selected: boolean;
   onSelect: () => void;
   onReview: (b: TaskBundle, verdict: Verdict) => Promise<void>;
+  onInspect: (t: InspectTarget) => void;
+  onKeepAlive: (key: Hex) => Promise<void>;
+  block: number;
 }) {
   const { task } = bundle;
   const [busy, setBusy] = useState(false);
@@ -58,12 +82,14 @@ export function TaskCard({
   const result = winningResult(task, bundle.bids, bundle.results);
   const valid = new Set(validBids(task, bundle.bids).map((b) => b.key));
   const bids = [...bundle.bids].sort((a, b) => a.price - b.price || a.order.block - b.order.block);
-  const runByOwner = new Map((bundle.runs ?? []).map((r) => [r.owner, r]));
-  const isPoster = account?.toLowerCase() === task.owner;
+  const runByOwner = new Map((bundle.runs ?? []).map((r) => [r.creator, r]));
+  const isPoster = account?.toLowerCase() === task.creator;
   const step = stepIndex(state);
   const working = state === "in_progress" && !!progress.winnerRun?.partial;
+  const review = ownerReview(task, bundle.reviews);
+  const resultLeft = result && block ? (result.expiresAt - block) * BLOCK_TIME_SEC : null;
 
-  async function review(v: Verdict) {
+  async function decide(v: Verdict) {
     setBusy(true);
     try {
       await onReview(bundle, v);
@@ -80,13 +106,22 @@ export function TaskCard({
           <div className="meta">
             <span className="chip-soft outline">{task.category}</span>
             <span>{task.reward} pts</span>
-            <span title={task.owner}>by {isPoster ? "you" : short(task.owner)}</span>
+            <span title={`$creator ${task.creator}`} className="signed">
+              ✓ by {isPoster ? "you" : short(task.creator)}
+            </span>
             {!["accepted", "rejected", "expired", "no_bids"].includes(state) && (
               <span className="tnum">⏱ {mmss(task.deadline - now)}</span>
             )}
           </div>
         </div>
-        <span className={`badge badge-${state}`}>{STATE_LABEL[state]}</span>
+        <span className="head-right">
+          <span className={`badge badge-${state}`}>{STATE_LABEL[state]}</span>
+          <OnArkiv
+            onClick={() =>
+              onInspect({ title: task.title, type: "task", entity: task, query: OPEN_TASKS_QUERY, why: WHY.task })
+            }
+          />
+        </span>
       </header>
 
       {step >= 0 && (
@@ -110,7 +145,7 @@ export function TaskCard({
       {bids.length > 0 && (
         <ul className="bids">
           {bids.map((b) => {
-            const run = runByOwner.get(b.owner);
+            const run = runByOwner.get(b.creator);
             const isWin = winner?.key === b.key;
             return (
               <li key={b.key} className={[isWin ? "win" : "", valid.has(b.key) ? "" : "late"].join(" ")}>
@@ -121,6 +156,12 @@ export function TaskCard({
                 <span className="price tnum">{b.price} pts</span>
                 <span className="pitch">{b.pitch}</span>
                 {run && <span className={`run-chip run-${run.stage}`}>{run.stage}</span>}
+                <OnArkiv
+                  label=""
+                  onClick={() =>
+                    onInspect({ title: `${b.agent} bid ${b.price} pts`, type: "bid", entity: b, query: BY_TASK_QUERY(task.key), why: WHY.bid })
+                  }
+                />
                 {!valid.has(b.key) && <span className="muted small">after window</span>}
               </li>
             );
@@ -136,16 +177,51 @@ export function TaskCard({
 
       {result && (
         <section>
-          <h4>Result from {result.agent}</h4>
+          <div className="split result-head">
+            <h4>
+              Result from {result.agent} <span className="signed">✓ signed by {short(result.creator)}</span>
+            </h4>
+            <OnArkiv
+              onClick={() =>
+                onInspect({ title: `Result from ${result.agent}`, type: "result", entity: result, query: BY_TASK_QUERY(task.key), why: WHY.result })
+              }
+            />
+          </div>
           <div className="output">
             <StreamingText text={result.output} live={false} />
           </div>
+          {review && (
+            <div className="split review-row" onClick={(e) => e.stopPropagation()}>
+              <span className="muted small">
+                {review.verdict === "accepted" ? "Accepted" : "Rejected"} by the poster ·{" "}
+                <button
+                  type="button"
+                  className="linkish"
+                  onClick={() =>
+                    onInspect({ title: `Review: ${review.verdict}`, type: "review", entity: review, query: BY_TASK_QUERY(task.key), why: WHY.review })
+                  }
+                >
+                  view review on Arkiv
+                </button>
+              </span>
+              {state === "accepted" && (
+                <button
+                  type="button"
+                  className="btn-ghost keep"
+                  onClick={() => onKeepAlive(result.key)}
+                  title="Results are created with permissionless extension: any wallet can keep a good answer on Arkiv longer"
+                >
+                  Keep alive +1 day{resultLeft !== null ? ` · ${Math.max(0, Math.round(resultLeft / 60))}m left` : ""}
+                </button>
+              )}
+            </div>
+          )}
           {isPoster && state === "delivered" && (
             <div className="actions" onClick={(e) => e.stopPropagation()}>
-              <button className="btn-primary" disabled={busy} onClick={() => review("accepted")}>
+              <button className="btn-primary" disabled={busy} onClick={() => decide("accepted")}>
                 <IconCheck /> Accept
               </button>
-              <button className="btn-ghost" disabled={busy} onClick={() => review("rejected")}>
+              <button className="btn-ghost" disabled={busy} onClick={() => decide("rejected")}>
                 <IconX /> Reject
               </button>
             </div>

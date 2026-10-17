@@ -12,17 +12,21 @@ export interface NewTask {
   minutes: number;
 }
 
-/** Post-a-task dialog. Signing happens in MetaMask; the dialog stays open until it's done. */
+/** Post-a-task dialog. The task is signed by the active wallet (test wallet or MetaMask). */
 export function PostForm({
   open,
   connected,
+  walletBusy,
   onClose,
+  onTryIt,
   onConnect,
   onPost,
 }: {
   open: boolean;
   connected: boolean;
+  walletBusy: boolean;
   onClose: () => void;
+  onTryIt: () => void;
   onConnect: () => void;
   onPost: (t: NewTask) => Promise<boolean>;
 }) {
@@ -107,12 +111,21 @@ export function PostForm({
         </p>
         {connected ? (
           <button className="btn-primary wide" disabled={busy}>
-            {busy ? "Confirm in MetaMask…" : "Post task"}
+            {busy ? "Signing and posting to Arkiv…" : "Post task"}
           </button>
         ) : (
-          <button type="button" className="btn-primary wide" onClick={onConnect}>
-            Connect MetaMask to post
-          </button>
+          <div className="wallet-choice">
+            <button type="button" className="btn-primary wide" onClick={onTryIt} disabled={walletBusy}>
+              {walletBusy ? "Preparing your test wallet…" : "Try it now: no wallet needed"}
+            </button>
+            <button type="button" className="btn-ghost wide" onClick={onConnect} disabled={walletBusy}>
+              Use MetaMask instead
+            </button>
+            <p className="muted small">
+              “Try it now” creates a Tiramisu test wallet in this browser and sends it a little test GLM. Your tasks and
+              reviews are signed by that wallet, so Arkiv records you as their creator.
+            </p>
+          </div>
         )}
       </form>
     </div>

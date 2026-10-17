@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Address } from "viem";
-import { EXPLORER, createReview, createTask } from "@/lib/arkiv";
+import { EXPLORER, createReview, createTask, keepAlive } from "@/lib/arkiv";
 import { leaderboard, taskState, winningResult } from "@/lib/rules";
-import type { TaskBundle, Verdict } from "@/lib/types";
-import { connect, walletClient } from "./wallet";
+import type { Hex, Profile, TaskBundle, Verdict } from "@/lib/types";
+import { connectMetaMask, existingBurner, startBurner, walletClient, type Signer } from "./wallet";
 import { useBoard } from "./useBoard";
 import { taskProgress } from "./progress";
 import { Overview } from "./components/Overview";
@@ -17,7 +16,11 @@ import { ActivityFeed } from "./components/ActivityFeed";
 import { TaskCard } from "./components/TaskCard";
 import { PostForm, type NewTask } from "./components/PostForm";
 import { Leaderboard } from "./components/Leaderboard";
-import { IconBars, IconBell, IconGrid, IconLogo, IconPlus, IconScan, IconTasks, IconTrophy, IconWallet } from "./components/icons";
+import { AgentsCard } from "./components/AgentsCard";
+import { EntityInspector, type InspectTarget } from "./components/EntityInspector";
+import { AgentHistory } from "./components/AgentHistory";
+import { BOARD_QUERY, BY_TASK_QUERY, PROFILE_QUERY, WHY } from "./inspect";
+import { IconBars, IconBell, IconCpu, IconGrid, IconLogo, IconPlus, IconScan, IconTasks, IconTrophy, IconWallet } from "./components/icons";
 
 /** Agents count as active if they bid or reported progress within this many blocks (~10 min). */
 const ACTIVE_BLOCKS = 300;
@@ -26,17 +29,30 @@ const NAV = [
   { id: "overview", label: "Overview", icon: <IconGrid /> },
   { id: "live", label: "Live Work", icon: <IconScan /> },
   { id: "tasks", label: "Tasks", icon: <IconTasks /> },
+  { id: "agents", label: "Agents", icon: <IconCpu /> },
   { id: "leaderboard", label: "Leaderboard", icon: <IconTrophy /> },
   { id: "activity", label: "Activity", icon: <IconBars /> },
 ];
 
 export default function Board() {
-  const { bundles, reviews, runs, bids, block, now, error, loaded, refresh, fetchRun, addParticipant } = useBoard();
-  const [account, setAccount] = useState<Address | null>(null);
+  const { bundles, reviews, runs, bids, profiles, block, now, error, loaded, refresh, fetchRun, addParticipant } = useBoard();
+  const [signer, setSigner] = useState<Signer | null>(null);
+  const account = signer?.address ?? null;
+  const [walletBusy, setWalletBusy] = useState(false);
+
+  // A burner created earlier in this browser comes back on reload.
+  useEffect(() => {
+    const b = existingBurner();
+    if (b) {
+      addParticipant(b.address);
+      setSigner(b);
+    }
+  }, [addParticipant]);
   const [toast, setToast] = useState<{ text: string; tx?: string; error?: boolean } | null>(null);
   const [posting, setPosting] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [nav, setNav] = useState("overview");
+  const [inspect, setInspect] = useState<InspectTarget | null>(null);
 
   const views = useMemo(
     () =>
@@ -76,8 +92,8 @@ export default function Board() {
   const deliveredCount = views.filter((v) => ["delivered", "accepted", "rejected"].includes(v.state)).length;
   const activeAgents = useMemo(() => {
     const owners = new Set<string>();
-    for (const r of runs) if (block - r.updatedBlock < ACTIVE_BLOCKS) owners.add(r.owner);
-    for (const b of bids) if (block - b.order.block < ACTIVE_BLOCKS) owners.add(b.owner);
+    for (const r of runs) if (block - r.updatedBlock < ACTIVE_BLOCKS) owners.add(r.creator);
+    for (const b of bids) if (block - b.order.block < ACTIVE_BLOCKS) owners.add(b.creator);
     return owners.size;
   }, [runs, bids, block]);
   const recentEvents = useMemo(
@@ -97,20 +113,28 @@ export default function Board() {
     setSelected(views[i].bundle.task.key);
   }
 
-  async function onConnect() {
+  async function adoptSigner(get: () => Promise<Signer>) {
+    setWalletBusy(true);
     try {
-      const addr = await connect();
-      addParticipant(addr);
-      setAccount(addr);
+      const s = await get();
+      addParticipant(s.address);
+      setSigner(s);
+      setToast({ text: s.kind === "burner" ? "Test wallet ready. You can post tasks and review results." : "MetaMask connected" });
+      return true;
     } catch (e: any) {
       setToast({ text: e?.message ?? String(e), error: true });
+      return false;
+    } finally {
+      setWalletBusy(false);
     }
   }
+  const onConnect = () => adoptSigner(connectMetaMask);
+  const onTryIt = () => adoptSigner(() => startBurner((text) => setToast({ text })));
 
   async function onPost(t: NewTask): Promise<boolean> {
-    if (!account) return false;
+    if (!signer) return false;
     try {
-      const w = await walletClient(account);
+      const w = await walletClient(signer);
       const deadline = Math.floor(Date.now() / 1000) + t.minutes * 60;
       const { txHash, entityKey } = await createTask(w, { ...t, deadline });
       setToast({ text: "Task posted. Agents are picking it up.", tx: txHash });
@@ -124,12 +148,38 @@ export default function Board() {
     }
   }
 
+  async function onKeepAlive(key: Hex) {
+    if (!signer) {
+      setToast({ text: "Get a test wallet first (Try it now), then any wallet can keep this result alive.", error: true });
+      return;
+    }
+    try {
+      const w = await walletClient(signer);
+      const { txHash } = await keepAlive(w, key, 1);
+      setToast({ text: "Kept alive for another day. Anyone can extend results, not just the agent.", tx: txHash });
+      refresh();
+    } catch (e: any) {
+      setToast({ text: e?.shortMessage ?? e?.message ?? String(e), error: true });
+    }
+  }
+
+  function inspectProfile(p: Profile) {
+    setInspect({
+      title: `${p.agent}'s public profile`,
+      type: "profile",
+      entity: p,
+      query: PROFILE_QUERY,
+      why: WHY.profile,
+      extra: <AgentHistory creator={p.creator} />,
+    });
+  }
+
   async function onReview(b: TaskBundle, verdict: Verdict) {
-    if (!account) return;
+    if (!signer) return;
     const result = winningResult(b.task, b.bids, b.results);
     if (!result) return;
     try {
-      const w = await walletClient(account);
+      const w = await walletClient(signer);
       const { txHash } = await createReview(w, b.task, result, verdict);
       setToast({ text: verdict === "accepted" ? "Result accepted" : "Result rejected", tx: txHash });
       refresh();
@@ -165,7 +215,7 @@ export default function Board() {
               {account.slice(2, 4).toUpperCase()}
             </span>
           ) : (
-            <button className="round" onClick={onConnect} aria-label="Connect MetaMask">
+            <button className="round" onClick={onTryIt} aria-label="Get a test wallet">
               <IconWallet />
             </button>
           )}
@@ -181,9 +231,16 @@ export default function Board() {
           <button className="seg active" onClick={() => setPosting(true)}>
             <IconPlus /> Post Task
           </button>
-          <button className="seg" onClick={account ? undefined : onConnect} title={account ?? "Connect MetaMask"}>
-            <IconWallet /> {account ? `${account.slice(0, 6)}…${account.slice(-4)}` : "Connect Wallet"}
-          </button>
+          {account ? (
+            <span className="seg" title={account}>
+              <IconWallet /> {signer?.kind === "burner" ? "Test wallet " : ""}
+              {`${account.slice(0, 6)}…${account.slice(-4)}`}
+            </span>
+          ) : (
+            <button className="seg" onClick={onTryIt} disabled={walletBusy} title="Creates a Tiramisu test wallet in this browser and funds it">
+              <IconWallet /> {walletBusy ? "Preparing…" : "Try it now"}
+            </button>
+          )}
         </div>
       </section>
 
@@ -251,14 +308,30 @@ export default function Board() {
                 selected={focus?.bundle.task.key === v.bundle.task.key}
                 onSelect={() => setSelected(v.bundle.task.key)}
                 onReview={onReview}
+                onInspect={setInspect}
+                onKeepAlive={onKeepAlive}
+                block={block}
               />
             ))}
           </div>
         </section>
-        <Leaderboard rows={leaders} />
+        <aside className="side-col">
+          <AgentsCard profiles={profiles} leaders={leaders} block={block} onInspect={inspectProfile} />
+          <Leaderboard rows={leaders} />
+        </aside>
       </div>
 
-      <PostForm open={posting} connected={!!account} onClose={() => setPosting(false)} onConnect={onConnect} onPost={onPost} />
+      <EntityInspector target={inspect} block={block} onClose={() => setInspect(null)} />
+
+      <PostForm
+        open={posting}
+        connected={!!account}
+        walletBusy={walletBusy}
+        onClose={() => setPosting(false)}
+        onTryIt={onTryIt}
+        onConnect={onConnect}
+        onPost={onPost}
+      />
     </div>
   );
 }

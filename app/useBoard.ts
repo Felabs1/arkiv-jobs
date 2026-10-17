@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getRun, isRateLimited, listBoard, publicClient, usingAccessKey } from "@/lib/arkiv";
-import type { Bid, Hex, Result, Review, Run, RunEvent, Task, TaskBundle } from "@/lib/types";
+import { eventsClient, getRun, isRateLimited, listBoard, usingAccessKey } from "@/lib/arkiv";
+import type { Bid, Hex, Profile, Result, Review, Run, RunEvent, Task, TaskBundle } from "@/lib/types";
 
 /** Keep finished tasks on screen this long after their deadline, even once Arkiv has expired them. */
 const KEEP_AFTER_DEADLINE_SEC = 15 * 60;
@@ -10,7 +10,7 @@ const KEEP_AFTER_DEADLINE_SEC = 15 * 60;
  * Board poll interval; backs off on errors. Streaming doesn't depend on it: run patches
  * arrive as events and fetch just that run.
  */
-const POLL_MS = 8000;
+const POLL_MS = 15_000;
 const MAX_POLL_MS = 60_000;
 /** Don't re-query the whole board more often than this, whatever the events say. */
 const MIN_REFRESH_GAP_MS = 3000;
@@ -68,6 +68,8 @@ export function useBoard() {
   const [now, setNow] = useState(() => Date.now() / 1000);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // Profiles are leases: replace them on every refresh so expired agents disappear.
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const inFlight = useRef(false);
   const delay = useRef(POLL_MS);
   const lastRefresh = useRef(0);
@@ -87,7 +89,8 @@ export function useBoard() {
       merge(c.results, snap.results);
       merge(c.reviews, snap.reviews);
       for (const r of snap.runs) mergeRun(c.runs, r);
-      for (const x of [...snap.tasks, ...snap.bids, ...snap.runs]) participants.current.add(x.owner);
+      for (const x of [...snap.tasks, ...snap.bids, ...snap.runs]) participants.current.add(x.creator);
+      setProfiles(snap.profiles);
       setBlock(snap.block);
       setVersion((v) => v + 1);
       setError(null);
@@ -147,8 +150,7 @@ export function useBoard() {
         refresh();
       }, wait);
     };
-    const unwatch = publicClient().watchEntityEvents({
-      pollingInterval: 2000,
+    const unwatch = eventsClient().watchEntityEvents({
       onEntityPatched: (e) => {
         const key = e.entityKey.toLowerCase();
         if (cache.current.runs.has(key)) fetchRun(key);
@@ -195,5 +197,5 @@ export function useBoard() {
   const runs = useMemo(() => [...cache.current.runs.values()], [version]);
   const bids = useMemo(() => [...cache.current.bids.values()], [version]);
 
-  return { bundles, reviews, runs, bids, block, now, error, loaded, refresh, fetchRun, addParticipant };
+  return { bundles, reviews, runs, bids, profiles, block, now, error, loaded, refresh, fetchRun, addParticipant };
 }
