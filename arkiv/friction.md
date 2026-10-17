@@ -67,7 +67,8 @@ This is what we hit while building Arkiv Jobs on Tiramisu, 17–18 October 2026.
 - **Surface:** entity metadata (0.8)
 - **Expected:** to order bids deterministically, "earliest bid wins ties", we used block, then transaction index, then operation index, which 0.6 exposed.
 - **Actual:** 0.8 only exposes `createdAt` (a block number). Two bids in the same block can't be ordered by arrival. We break ties by entity key, which is deterministic but arbitrary, and a bidder could grind the salt for a lower key. Events do carry `(blockNumber, logIndex)`, but only if you were watching when they happened.
-- **Fix:** add `createdAtTxIndex` and `createdAtLogIndex` back as selectable fields.
+- **Related:** an entity read with `select("*")` doesn't include its creation transaction hash either. To link "view on explorer" to the transaction rather than the creator's address page, we look up the `EntityCreated` log by `entityKey` in the creation block: `getLogs({ event: EntityCreated, args: { entityKey }, fromBlock: createdAt, toBlock: createdAt })` (`findCreationTx` in `lib/arkiv.ts`).
+- **Fix:** add `createdAtTxIndex`, `createdAtLogIndex` and `createdInTx` back as selectable fields.
 
 ## 7. The node rejects `!=` although the SDK exports `ne()`
 

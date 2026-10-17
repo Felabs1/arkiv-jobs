@@ -1,5 +1,6 @@
 import {
   createPublicClient,
+  ENTITY_EVENTS_ABI,
   ExpirationTime,
   jsonToPayload,
   u64,
@@ -347,6 +348,22 @@ export function isRateLimited(e: any): boolean {
 
 export function usingAccessKey(): boolean {
   return rpcUrl().replace(/\/+$/, "") !== tiramisu.rpcUrls.default.http[0].replace(/\/+$/, "");
+}
+
+const ENTITY_CREATED = ENTITY_EVENTS_ABI.find((e) => e.type === "event" && e.name === "EntityCreated")!;
+
+/**
+ * The transaction that created an entity. Entity metadata only has the creation block, so look up
+ * the EntityCreated log for this key in that one block (a plain eth_getLogs, no query quota).
+ */
+export async function findCreationTx(key: Hex, block: number): Promise<Hex | null> {
+  const logs = await publicClient().getLogs({
+    event: ENTITY_CREATED as any,
+    args: { entityKey: key } as any,
+    fromBlock: BigInt(block),
+    toBlock: BigInt(block),
+  });
+  return (logs[0]?.transactionHash as Hex | undefined) ?? null;
 }
 
 /** Plain eth_blockNumber: it doesn't spend Arkiv query quota. */

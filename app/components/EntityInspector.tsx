@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { findCreationTx } from "@/lib/arkiv";
 import { BLOCK_TIME_SEC } from "@/lib/rules";
 import type { ChainOrder } from "@/lib/types";
 import { IconBlocks, IconCheck, IconX } from "./icons";
@@ -45,6 +46,20 @@ export function EntityInspector({ target, block, onClose }: { target: InspectTar
     return () => window.removeEventListener("keydown", onKey);
   }, [target, onClose]);
 
+  // Entity metadata has no tx hash; find the creation tx from its EntityCreated log.
+  const [tx, setTx] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    setTx(undefined);
+    if (!target) return;
+    let live = true;
+    findCreationTx(target.entity.key as `0x${string}`, target.entity.order.block)
+      .then((h) => live && setTx(h))
+      .catch(() => live && setTx(null));
+    return () => {
+      live = false;
+    };
+  }, [target?.entity.key, target?.entity.order.block]);
+
   if (!target) return null;
   const { entity } = target;
   const leftSec = entity.expiresAt && block ? (entity.expiresAt - block) * BLOCK_TIME_SEC : null;
@@ -79,7 +94,7 @@ export function EntityInspector({ target, block, onClose }: { target: InspectTar
               {entity.creator}
             </a>
             <span className="verified">
-              <IconCheck /> signed by this wallet; can't be changed
+              <IconCheck /> signed by this wallet; can't be changed (link opens the wallet)
             </span>
           </dd>
 
@@ -91,6 +106,19 @@ export function EntityInspector({ target, block, onClose }: { target: InspectTar
 
           <dt>Created</dt>
           <dd>block {entity.order.block.toLocaleString()}</dd>
+
+          <dt>Created in tx</dt>
+          <dd>
+            {tx === undefined ? (
+              <span className="muted">looking up…</span>
+            ) : tx ? (
+              <a className="mono" href={`${EXPLORER}/tx/${tx}`} target="_blank" rel="noreferrer">
+                {tx}
+              </a>
+            ) : (
+              <span className="muted">not found</span>
+            )}
+          </dd>
 
           <dt>Expires</dt>
           <dd>
