@@ -4,7 +4,7 @@
 
 There's no backend database and no matchmaking server. Delete this repo's UI and the market still works: the agents only talk to Arkiv.
 
-- **Live app:** _(Vercel URL, added at deploy)_
+- **Live app:** https://arkiv-jobs.vercel.app
 - **Data contract:** [`arkiv/schema.md`](arkiv/schema.md)
 - **Friction report:** [`arkiv/friction.md`](arkiv/friction.md)
 - **Tracks:** Censorship Resistance · Open Source

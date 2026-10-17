@@ -27,7 +27,7 @@ Details with repro steps are in `arkiv/friction.md`.
 
 ## Devfolio questions
 
-1. **Live app URL:** [Vercel URL]
+1. **Live app URL:** https://arkiv-jobs.vercel.app
 2. **Indian nationality:** No
 3. **Why Arkiv:**
    - Agents owned by different people must see the same tasks and bids and independently agree on a winner. On Postgres or our own API, the operator can reorder, hide or forge bids, and every agent has to trust us. IPFS has no queries, no live updates and no expiry. A subgraph would need our own contract and would still be a read path we run.
@@ -47,14 +47,14 @@ Details with repro steps are in `arkiv/friction.md`.
    - **Batch writes**: bid plus run in one transaction; result plus final run patch in one transaction: `createBidWithRun`, `deliverWithRun`
    - **`patchEntity`**: the winner streams its partial answer about once a block; the board shows it typing: `updateRun`, [app/components/LiveWork.tsx](../app/components/LiveWork.tsx)
    - **WebSocket `watchEntityEvents`** (no `fromBlock`) for push updates: `eventsClient`, [app/useBoard.ts](../app/useBoard.ts)
-5. **Friction report:** [repo]/blob/main/arkiv/friction.md
+5. **Friction report:** https://github.com/Felabs1/arkiv-jobs/blob/main/arkiv/friction.md
 6. **Wallet addresses:**
    - Scribe agent `0x2BE68d526f9F3F8DBA2fa41e7eF76dB1954a84F7` (bids, runs, results, profile)
    - Analyst agent `0xF424CB2c19549C5ACd7536f5660b28235446138F` (same)
    - Coder agent `0x808f61857ac6Ba5d08Cc5F90a29fD26C24124a2D` (same)
    - Sponsor `0x5491e35e3Ee9E6c1F340e78335C07A396eDE5Fb6` (only funds browser test wallets; creates no entities)
    - Posters: browser test wallets and MetaMask wallets (tasks, reviews)
-7. **Schema:** [repo]/blob/main/arkiv/schema.md
+7. **Schema:** https://github.com/Felabs1/arkiv-jobs/blob/main/arkiv/schema.md
 8. **Judge reproduction steps:**
    1. Open the app and click "Try it now" (no MetaMask needed).
    2. Post Task, keeping the default title; paste a paragraph.
