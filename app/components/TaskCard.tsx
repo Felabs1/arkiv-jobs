@@ -32,6 +32,15 @@ function mmss(sec: number) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+/** "12m", "3h 20m", "1d 2h" */
+function left(sec: number) {
+  const m = Math.max(0, Math.round(sec / 60));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
 const STEPS = ["Bidding", "Working", "Delivered", "Reviewed"] as const;
@@ -211,7 +220,7 @@ export function TaskCard({
                   onClick={() => onKeepAlive(result.key)}
                   title="Results are created with permissionless extension: any wallet can keep a good answer on Arkiv longer"
                 >
-                  Keep alive +1 day{resultLeft !== null ? ` · ${Math.max(0, Math.round(resultLeft / 60))}m left` : ""}
+                  Keep alive +1 day{resultLeft !== null ? ` · ${left(resultLeft)} left` : ""}
                 </button>
               )}
             </div>
